@@ -1,0 +1,160 @@
+# V2board 本地后端：nginx + php-fpm + mysql + redis + horizon（scheduler 可选）
+# 用法见 README.md。源码来自 ./src（由 scripts/sync-src.sh 同步，默认是 wyx2685/v2board 的 master）。
+
+x-php-image: &php-image
+  image: v2b-demo-php:8.2
+  pull_policy: never
+  volumes:
+    - ./src:/var/www/html
+    - ./seed:/seed:ro
+    - composer-cache:/composer/cache
+  environment:
+    PHP_OUTPUT_BUFFERING: ${PHP_OUTPUT_BUFFERING:-4096}
+  restart: unless-stopped
+
+services:
+  mysql:
+    image: ${MYSQL_IMAGE:-mysql:8.4}
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-v2board}
+      MYSQL_USER: ${MYSQL_USER:-v2board}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-v2board}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docker/mysql/conf.d:/etc/mysql/conf.d:ro
+      - ./docker/mysql/initdb:/docker-entrypoint-initdb.d:ro
+      - ./src/database:/v2b-database:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    restart: unless-stopped
+
+  redis:
+    image: ${REDIS_IMAGE:-redis:7-alpine}
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # 一次性初始化：composer install、生成 src/.env、APP_KEY、config/v2board.php、管理员、演示数据
+  init:
+    <<: *php-image
+    build:
+      context: ./docker/php
+      args:
+        PHP_BASE_IMAGE: ${PHP_BASE_IMAGE:-php:8.2-fpm-bookworm}
+        APT_MIRROR: ${APT_MIRROR:-}
+    pull_policy: build
+    command: ["v2b-init"]
+    restart: "no"
+    environment:
+      PHP_OUTPUT_BUFFERING: ${PHP_OUTPUT_BUFFERING:-4096}
+      V2B_SECURE_PATH: ${V2B_SECURE_PATH:-devadmin123}
+      V2B_APP_NAME: ${V2B_APP_NAME:-V2Board}
+      V2B_APP_URL: ${V2B_APP_URL:-http://localhost:6600}
+      V2B_ADMIN_EMAIL: ${V2B_ADMIN_EMAIL:-admin@example.com}
+      V2B_ADMIN_PASSWORD: ${V2B_ADMIN_PASSWORD:-admin123456}
+      V2B_SEED_DEMO: ${V2B_SEED_DEMO:-1}
+      DEMO_DAYS: ${DEMO_DAYS:-120}
+      V2B_HORIZON_MAX_PROCESSES: ${V2B_HORIZON_MAX_PROCESSES:-4}
+      V2B_DB_DATABASE: ${MYSQL_DATABASE:-v2board}
+      V2B_DB_USERNAME: ${MYSQL_USER:-v2board}
+      V2B_DB_PASSWORD: ${MYSQL_PASSWORD:-v2board}
+      V2B_COMPOSER_MIRROR: ${V2B_COMPOSER_MIRROR:-}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  php:
+    <<: *php-image
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  horizon:
+    <<: *php-image
+    command: ["php", "artisan", "horizon"]
+    stop_signal: SIGTERM
+    healthcheck:
+      test: ["CMD", "php", "artisan", "horizon:status"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  # 公开演示站：每小时整点复原演示数据，每 5 分钟刷新在线状态，每分钟守护关键配置（seed/demo/daemon.php）。
+  # 默认不启动；.env 里 DEMO_ENABLE=1 时 up.sh / update.sh 会启动它，也可以 docker compose --profile demo up -d demo
+  demo:
+    <<: *php-image
+    command: ["php", "/seed/demo/daemon.php"]
+    profiles: ["demo"]
+    environment:
+      PHP_OUTPUT_BUFFERING: ${PHP_OUTPUT_BUFFERING:-4096}
+      DEMO_ENABLE: "1"
+      DEMO_DAYS: ${DEMO_DAYS:-120}
+      V2B_SECURE_PATH: ${V2B_SECURE_PATH:-devadmin123}
+      V2B_APP_NAME: ${V2B_APP_NAME:-V2Board}
+      V2B_APP_URL: ${V2B_APP_URL:-http://localhost:6600}
+      V2B_ADMIN_EMAIL: ${V2B_ADMIN_EMAIL:-admin@example.com}
+      V2B_ADMIN_PASSWORD: ${V2B_ADMIN_PASSWORD:-admin123456}
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  # V2board 自带的定时任务默认不启动（会改动演示数据、访问外网；演示数据的统计由生成器按同样的规则算），
+  # 需要时：docker compose --profile cron up -d scheduler
+  scheduler:
+    <<: *php-image
+    command: ["php", "artisan", "schedule:work"]
+    profiles: ["cron"]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  nginx:
+    image: ${NGINX_IMAGE:-nginx:alpine}
+    ports:
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-6600}:80"
+    volumes:
+      - ./src/public:/var/www/html/public:ro
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - php
+    restart: unless-stopped
+
+  # 同源部署新管理端的演示（默认不启动）：http://localhost:6601/<后台路径>/ 是新管理端，其余路径与 6600 相同。
+  # 需要先在 v2board-admin 用同源配置打包，见 README「同源部署新管理端（演示）」
+  admin-nginx:
+    image: ${NGINX_IMAGE:-nginx:alpine}
+    profiles: ["admin"]
+    ports:
+      - "${HTTP_BIND:-127.0.0.1}:${ADMIN_HTTP_PORT:-6601}:80"
+    environment:
+      V2B_SECURE_PATH: ${V2B_SECURE_PATH:-devadmin123}
+    volumes:
+      - ./src/public:/var/www/html/public:ro
+      - ${ADMIN_DIST:-../v2board-admin/dist}:/www/wwwroot/v2board-admin:ro
+      - ./docker/nginx/admin-same-origin.conf.template:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      - php
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  redis-data:
+  composer-cache:

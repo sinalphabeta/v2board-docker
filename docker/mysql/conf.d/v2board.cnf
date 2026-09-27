@@ -1,0 +1,10 @@
+[mysqld]
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+default-time-zone = '+08:00'
+# 开发机内存有限，缩小缓冲池
+innodb_buffer_pool_size = 256M
+skip-name-resolve
+# 不开二进制日志：演示数据每小时整表重写一次，没有主从复制时日志只会越积越多（默认保留 30 天）；
+# 开着的时候普通账号也建不了触发器（演示站用触发器保护管理员账号）
+skip-log-bin

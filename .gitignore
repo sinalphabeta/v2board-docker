@@ -1,0 +1,9 @@
+# V2board 源码副本（由 scripts/sync-src.sh 生成，包含 vendor、.env 等运行时文件）
+/src/
+# 本地运行参数
+.env
+.DS_Store
+# 同步源码时的 git 缓存（scripts/sync-src.sh）
+/.cache/
+# 更新脚本的数据库备份（scripts/update.sh）
+/backups/
