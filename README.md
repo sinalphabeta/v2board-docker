@@ -73,7 +73,7 @@ cp .env.example .env      # 按需修改端口、后台路径、管理员账号
    |---|---|
    | `DEMO_ENABLE=1` | 打开演示站模式 |
    | `V2B_APP_URL=https://<后端域名>` | 站点地址 |
-   | `V2B_SECURE_PATH` | 后台路径（管理端的 `config.js` 里也要填同一个） |
+   | `V2B_SECURE_PATH` | 后台路径（管理端的 `V2B_SECURE_PATH` 也要填同一个） |
    | `V2B_ADMIN_EMAIL` / `V2B_ADMIN_PASSWORD` | 演示账号，会公开给访客 |
    | `MYSQL_PASSWORD` / `MYSQL_ROOT_PASSWORD` | 用 `openssl rand -hex 16` 生成 |
    | `HTTP_BIND=127.0.0.1`、`HTTP_PORT=6600` | 只让本机的 cloudflared 访问 |
@@ -83,9 +83,10 @@ cp .env.example .env      # 按需修改端口、后台路径、管理员账号
 5. 检查：
    - `./scripts/check-cors.sh https://<管理端域名>`：以跨域方式检查预检、登录和管理接口。
    - `docker compose logs -f demo`：确认每小时都有「复原完成」。
-6. 管理端：用 Cloudflare Pages 部署 v2board-admin。环境变量设置 `V2B_API_HOST=https://<后端域名>`、`V2B_SECURE_PATH`，
-   再加 `V2B_DEMO_EMAIL`、`V2B_DEMO_PASSWORD`，登录页就会预填并显示演示账号，顶栏显示「演示站 · 数据每小时整点复原」。
-   详见 v2board-admin 的 DEPLOY.md。
+6. 管理端：用 [v2board-admin](https://github.com/sinalphabeta/v2board-admin) README 里的「Deploy to Cloudflare」按钮部署到 Cloudflare Workers
+   （或者在 Workers 里直接导入 v2board-admin 仓库），变量填 `V2B_API_HOST=https://<后端域名>`、`V2B_SECURE_PATH`。
+   再在 Worker 的「设置 → 变量和机密」里加 `V2B_DEMO_EMAIL`、`V2B_DEMO_PASSWORD`，登录页就会预填并显示演示账号，
+   顶栏显示「演示站 · 数据每小时整点复原」。
 
 `demo` 服务（`seed/demo/daemon.php`）做的事：
 
@@ -163,7 +164,7 @@ MySQL 数据卷首次创建时，`docker/mysql/initdb/01-install.sh` 会导入 `
 ## 同源部署新管理端（演示）
 
 `admin-nginx`（默认不启动）模拟常见的宝塔站点配置：V2Board 伪静态、宝塔默认的 js / css 缓存规则，
-再加上 v2board-admin 的 DEPLOY.md 里同源部署的两段 location（见 `docker/nginx/admin-same-origin.conf.template`）。
+再加上同源部署新管理端的两段 location（见 `docker/nginx/admin-same-origin.conf.template`）。
 新管理端在 `http://localhost:6601/devadmin123/`，访问 `/devadmin123` 会跳转过去；API、用户前台等其余路径与 6600 相同。
 需要把 v2board-admin 放在本仓库的同级目录：
 

@@ -1,5 +1,5 @@
 # 同源部署新管理端（v2board-admin）的演示：模拟常见的宝塔站点配置（V2Board 伪静态 + 宝塔默认的静态文件缓存规则），
-# 再加上 ../v2board-admin/DEPLOY.md 里的两段 location（这里把「后台路径」换成了 ${V2B_SECURE_PATH}）。
+# 再加上同源部署新管理端的两段 location（这里把「后台路径」换成了 ${V2B_SECURE_PATH}）。
 # nginx 官方镜像启动时用 envsubst 把 ${V2B_SECURE_PATH} 替换成环境变量的值（nginx 自己的 $uri 等变量不受影响）。
 server {
     listen 80;
@@ -9,7 +9,7 @@ server {
     charset utf-8;
     client_max_body_size 16m;
 
-    # ---- DEPLOY.md 的同源部署配置（开始）----
+    # ---- 同源部署新管理端（开始）----
     # 访问原来的后台地址时跳转到新管理端（相对地址跳转：在 CDN / 反向代理后面也不会跳到 http 或错误的端口）
     location = /${V2B_SECURE_PATH} {
         absolute_redirect off;
@@ -28,7 +28,7 @@ server {
             add_header X-Robots-Tag "noindex, nofollow";
         }
     }
-    # ---- DEPLOY.md 的同源部署配置（结束）----
+    # ---- 同源部署新管理端（结束）----
 
     # V2Board 伪静态
     location /downloads {
